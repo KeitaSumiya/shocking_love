@@ -1,8 +1,9 @@
-# http://qiita.com/serinuntius/items/ce8183a283795d9fdb01#_reference-b16085e1ba9c4002dabe
-# http://gamepro.blog.jp/python/pyaudio%E3%81%A7wav%E5%86%8D%E7%94%9F
-
+import sys
+import numpy as np
+import tensorflow as tf
 import dlib
 import cv2
+
 import wave
 import pyaudio
 import threading
@@ -62,15 +63,91 @@ class AudioPlayer(object):
             self.thread.join()
 
 
+NUM_CLASSES = 2
+IMAGE_SIZE = 28
+IMAGE_PIXELS = IMAGE_SIZE*IMAGE_SIZE*3
+
+def inference(images_placeholder, keep_prob):
+    """ モデルを作成する関数
+
+    引数: 
+      images_placeholder: inputs()で作成した画像のplaceholder
+      keep_prob: dropout率のplace_holder
+
+    返り値:
+      cross_entropy: モデルの計算結果
+    """
+    def weight_variable(shape):
+      initial = tf.truncated_normal(shape, stddev=0.1)
+      return tf.Variable(initial)
+
+    def bias_variable(shape):
+      initial = tf.constant(0.1, shape=shape)
+      return tf.Variable(initial)
+
+    def conv2d(x, W):
+      return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+
+    def max_pool_2x2(x):
+      return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
+                            strides=[1, 2, 2, 1], padding='SAME')
+    
+    x_image = tf.reshape(images_placeholder, [-1, 28, 28, 3])
+
+    with tf.name_scope('conv1') as scope:
+        W_conv1 = weight_variable([5, 5, 3, 32])
+        b_conv1 = bias_variable([32])
+        h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
+
+    with tf.name_scope('pool1') as scope:
+        h_pool1 = max_pool_2x2(h_conv1)
+    
+    with tf.name_scope('conv2') as scope:
+        W_conv2 = weight_variable([5, 5, 32, 64])
+        b_conv2 = bias_variable([64])
+        h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
+
+    with tf.name_scope('pool2') as scope:
+        h_pool2 = max_pool_2x2(h_conv2)
+
+    with tf.name_scope('fc1') as scope:
+        W_fc1 = weight_variable([7*7*64, 1024])
+        b_fc1 = bias_variable([1024])
+        h_pool2_flat = tf.reshape(h_pool2, [-1, 7*7*64])
+        h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
+        h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+
+    with tf.name_scope('fc2') as scope:
+        W_fc2 = weight_variable([1024, NUM_CLASSES])
+        b_fc2 = bias_variable([NUM_CLASSES])
+
+    with tf.name_scope('softmax') as scope:
+        y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
+
+    return y_conv
 
 
 detector = dlib.get_frontal_face_detector()
 
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
+
+player1 = AudioPlayer("in/heart120.wav")
+player2 = AudioPlayer("in/heart60.wav")
+#player1 = AudioPlayer("in/1.wav")
+#player2 = AudioPlayer("in/2.wav")
 
 
-player1 = AudioPlayer("in/1.wav")
-player2 = AudioPlayer("in/2.wav")
+images_placeholder = tf.placeholder("float", shape=(None, IMAGE_PIXELS))
+labels_placeholder = tf.placeholder("float", shape=(None, NUM_CLASSES))
+keep_prob = tf.placeholder("float")
+
+logits = inference(images_placeholder, keep_prob)
+sess = tf.InteractiveSession()
+
+saver = tf.train.Saver()
+sess.run(tf.initialize_all_variables())
+saver.restore(sess, "in/model.ckpt")
+
 
 while(True):
     # Capture frame-by-frame
@@ -78,18 +155,35 @@ while(True):
 
     dets = detector(frame)
 
+    isMe = 'other'
     for d in dets:
         cv2.rectangle(frame, (d.left(), d.top()), (d.right(), d.bottom()), (0, 0, 255), 2)
         print( d.left(), d.top(), d.right(), d.bottom(), d.right()-d.left(), d.bottom()-d.top() )
 
-        if(d.right()-d.left() > 300):
-            print("play 1")
-            player1.play()
-        if(d.right()-d.left() < 300):
+        img = frame[d.top():d.bottom(), d.left():d.right()]
+        img = cv2.resize(img, (28, 28))
+        print( len(img[0]) )
+        test_image = np.asarray(img.flatten().astype(np.float32)/255.0)
+
+        pred = np.argmax(logits.eval(feed_dict={ 
+            images_placeholder: [test_image],
+            keep_prob: 1.0 })[0])
+        print( pred )
+        if( pred == 0 ):
+            isMe = 'me'
+            cv2.rectangle(frame, (d.left(), d.top()), (d.right(), d.bottom()), (255, 0, 255), 4)
+
+    if( isMe == 'me' ):
+        print("play 1")
+        player2.stop()
+        player1.play()
+        sleep(1)
+    elif( isMe == 'other' ):
+        player1.stop()
+        if( len(dets) > 0 ):
             print("play 2")
             player2.play()
-
-
+            sleep(1)
 
 
 
@@ -99,8 +193,8 @@ while(True):
         break
 
     if cv2.waitKey(1) & 0xFF == ord('s'):
-        player2.stop()
         player1.stop()
+        player2.stop()
 
 # When everything done, release the capture
 cap.release()
