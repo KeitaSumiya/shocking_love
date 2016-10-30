@@ -9,8 +9,10 @@ import pyaudio
 import threading
 from time import sleep
 
-CHUNK = 1024
+from osax import *
 
+CHUNK = 1024
+sa = OSAX()
 
 class AudioPlayer(object):
     """ A Class For Playing Audio """
@@ -179,9 +181,12 @@ while(True):
         player1.play()
         sleep(1)
     elif( isMe == 'other' ):
+        sa.set_volume(10)
+
         player1.stop()
         if( len(dets) > 0 ):
             print("play 2")
+            sa.set_volume(3)
             player2.play()
             sleep(1)
 
@@ -199,6 +204,3 @@ while(True):
 # When everything done, release the capture
 cap.release()
 cv2.destroyAllWindows()
-
-
-
