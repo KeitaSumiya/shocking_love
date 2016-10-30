@@ -19,7 +19,7 @@ class AudioPlayer(object):
 
     def __init__(self, audio_file):
         self.audio_file = audio_file
-        self.playing = threading.Event()    # 再生中フラグ
+        self.playing = threading.Event()
 
     def run(self):
         """ Play audio in a sub-thread """
@@ -70,15 +70,8 @@ IMAGE_SIZE = 28
 IMAGE_PIXELS = IMAGE_SIZE*IMAGE_SIZE*3
 
 def inference(images_placeholder, keep_prob):
-    """ モデルを作成する関数
 
-    引数: 
-      images_placeholder: inputs()で作成した画像のplaceholder
-      keep_prob: dropout率のplace_holder
 
-    返り値:
-      cross_entropy: モデルの計算結果
-    """
     def weight_variable(shape):
       initial = tf.truncated_normal(shape, stddev=0.1)
       return tf.Variable(initial)
@@ -150,56 +143,79 @@ saver = tf.train.Saver()
 sess.run(tf.initialize_all_variables())
 saver.restore(sess, "in/model.ckpt")
 
-
+count = 0
+#isMe = 'other'
 while(True):
+    count = count + 1
+    print(count)
     # Capture frame-by-frame
+    #print("len", len(cap.read()))
     ret, frame = cap.read()
+#    print("height", len(frame) )
+#    print("width", len(frame[0]) )
+    height = len(frame)
 
-    dets = detector(frame)
+    if(ret):
+        dets = detector(frame)
 
-    isMe = 'other'
-    for d in dets:
-        cv2.rectangle(frame, (d.left(), d.top()), (d.right(), d.bottom()), (0, 0, 255), 2)
-        print( d.left(), d.top(), d.right(), d.bottom(), d.right()-d.left(), d.bottom()-d.top() )
+        isMe = 'other'
+        if len(dets) != 0:
+            for d in dets:
+                if d.top() > 0 and d.left() > 0 and d.bottom() > 0 and d.right() > 0: 
+                    cv2.rectangle(frame, (d.left(), d.top()), (d.right(), d.bottom()), (0, 0, 255), 2)
+                    print( d.left(), d.top(), d.right(), d.bottom(), d.right()-d.left(), d.bottom()-d.top() )
 
-        img = frame[d.top():d.bottom(), d.left():d.right()]
-        img = cv2.resize(img, (28, 28))
-        print( len(img[0]) )
-        test_image = np.asarray(img.flatten().astype(np.float32)/255.0)
+                    img = frame[d.top():d.bottom(), d.left():d.right()]
+                    img = cv2.resize(img, (28, 28))
+                    #print( len(img[0]) )
+                    test_image = np.asarray(img.flatten().astype(np.float32)/255.0)
 
-        pred = np.argmax(logits.eval(feed_dict={ 
-            images_placeholder: [test_image],
-            keep_prob: 1.0 })[0])
-        print( pred )
-        if( pred == 0 ):
-            isMe = 'me'
-            cv2.rectangle(frame, (d.left(), d.top()), (d.right(), d.bottom()), (255, 0, 255), 4)
+                    pred = np.argmax(logits.eval(feed_dict={ 
+                        images_placeholder: [test_image],
+                        keep_prob: 1.0 })[0])
+                    print( "prediction", pred )
+                    if( pred == 0 ):
+                        isMe = 'me'
+                        cv2.rectangle(frame, (d.left(), d.top()), (d.right(), d.bottom()), (255, 0, 255), 4)
 
-    if( isMe == 'me' ):
-        print("play 1")
-        player2.stop()
-        player1.play()
-        sleep(1)
-    elif( isMe == 'other' ):
-        sa.set_volume(10)
-
-        player1.stop()
-        if( len(dets) > 0 ):
-            print("play 2")
+                if( isMe == 'me' ):
+                    player2.stop()
+                    print("play 1")
+                    sa.set_volume(70)
+                    if( d.bottom() - d.top() > 0.6*height ):
+                        sa.set_volume(140)
+                    player1.play()
+                    sleep(1)
+                elif( isMe == 'other' ):
+                    player1.stop()
+                    sa.set_volume(3)
+                    player2.play()
+                    sleep(1)
+        else:
+            player1.stop()
             sa.set_volume(3)
             player2.play()
             sleep(1)
+        # Display the resulting frame
+        cv2.imshow("frame",frame)
+
+    else:
+        player1.stop()
+        sa.set_volume(3)
+        player2.play()
+        sleep(1)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 
 
-    # Display the resulting frame
-    cv2.imshow("frame",frame)
+#        # Display the resulting frame
+#        cv2.imshow("frame",frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+cap.release()
+cv2.destroyAllWindows()
 
-    if cv2.waitKey(1) & 0xFF == ord('s'):
-        player1.stop()
-        player2.stop()
 
 # When everything done, release the capture
 cap.release()
